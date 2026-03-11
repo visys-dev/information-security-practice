@@ -7,4 +7,9 @@ services:
     volumes:
       - .:/app_code
       - db_data:/app_code/data
+    environment:
+      - PYTHONUNBUFFERED=1
     restart: unless-stopped
+
+volumes:
+  db_data:
