@@ -1,8 +1,10 @@
 services:
-  app:
+  api:
     build: .
-    container_name: information-security-practice
+    container_name: dean_office_api
     ports:
       - "3010:3010"
     volumes:
       - .:/app_code
+      - db_data:/app_code/data
+    restart: unless-stopped
