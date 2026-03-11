@@ -1,0 +1,8 @@
+services:
+  app:
+    build: .
+    container_name: information-security-practice
+    ports:
+      - "3010:3010"
+    volumes:
+      - .:/app_code
