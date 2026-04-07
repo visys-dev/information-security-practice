@@ -4,7 +4,8 @@
 """
 
 from app.database import SessionLocal
-from app.models import Role, Permission, User, Group, Subject, role_permissions
+from app.models import Role, Permission, User, Group, Subject
+from app.security import hash_password
 
 
 def seed():
@@ -62,13 +63,11 @@ def seed():
         db.add(subject)
 
         # --- Тестові користувачі ---
-        # УВАГА: паролі у відкритому вигляді!
-        # Буде виправлено у практичній №4
         admin_user = User(
             username="admin",
             email="admin@university.edu",
             full_name="Адміністратор Системи",
-            password_hash="admin123",
+            password_hash=hash_password("admin123"),
             is_active=True,
         )
         admin_user.roles.append(admin)
@@ -77,7 +76,7 @@ def seed():
             username="petrov",
             email="petrov@university.edu",
             full_name="Петров Іван Сергійович",
-            password_hash="teacher123",
+            password_hash=hash_password("teacher123"),
         )
         teacher_user.roles.append(teacher)
 
@@ -85,7 +84,7 @@ def seed():
             username="ivanov",
             email="ivanov@university.edu",
             full_name="Іванов Олексій Петрович",
-            password_hash="student123",
+            password_hash=hash_password("student123"),
             group_id=group.id,
         )
         student_user.roles.append(student)
