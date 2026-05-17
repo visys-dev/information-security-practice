@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from jose import JWTError
+from pydantic import ValidationError
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 
@@ -10,6 +11,7 @@ from app.auth.jwt_handler import (
     verify_token,
 )
 from app.database import get_db
+from app.middleware.rate_limiter import limiter
 from app.models import User
 from app.schemas import (
     LoginRequest,
@@ -30,7 +32,12 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     status_code=status.HTTP_201_CREATED,
     summary="Реєстрація нового користувача",
 )
-def register(user_data: UserCreate, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def register(
+    request: Request,
+    user_data: UserCreate,
+    db: Session = Depends(get_db),
+):
     """
     Реєстрація користувача
     """
@@ -79,16 +86,33 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     response_model=TokenResponse,
     summary="Вхід користувача",
 )
+@limiter.limit("5/minute")
 def login(
+    request: Request,
     credentials: LoginRequest | None = Body(default=None),
-    username: str | None = Query(default=None),
-    password: str | None = Query(default=None),
+    username: str | None = Query(
+        default=None,
+        min_length=3,
+        max_length=30,
+        pattern=r"^[a-zA-Z0-9_]+$",
+    ),
+    password: str | None = Query(default=None, min_length=1, max_length=128),
     db: Session = Depends(get_db),
 ):
     """
     Аутентифікація користувача та видача JWT access/refresh токенів.
     """
     if credentials is not None:
+        username = credentials.username
+        password = credentials.password
+    elif username is not None and password is not None:
+        try:
+            credentials = LoginRequest(username=username, password=password)
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=exc.errors(),
+            )
         username = credentials.username
         password = credentials.password
 
