@@ -58,3 +58,23 @@ class LoginResponse(BaseModel):
     user_id: int
     username: str
     roles: list[str]
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class TokenRefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class UserInfo(BaseModel):
+    id: int
+    username: str
+    email: EmailStr
+    full_name: str
+    role: str
+
+    model_config = {"from_attributes": True}

@@ -1,10 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from jose import JWTError
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 
+from app.auth.dependencies import get_current_user
+from app.auth.jwt_handler import (
+    create_access_token,
+    create_refresh_token,
+    verify_token,
+)
 from app.database import get_db
 from app.models import User
-from app.schemas import UserCreate, UserResponse, LoginRequest, LoginResponse
+from app.schemas import (
+    LoginRequest,
+    TokenRefreshRequest,
+    TokenResponse,
+    UserCreate,
+    UserInfo,
+    UserResponse,
+)
 from app.security import hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -62,27 +76,39 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
 @router.post(
     "/login",
-    response_model=LoginResponse,
+    response_model=TokenResponse,
     summary="Вхід користувача",
 )
-def login(credentials: LoginRequest, db: Session = Depends(get_db)):
+def login(
+    credentials: LoginRequest | None = Body(default=None),
+    username: str | None = Query(default=None),
+    password: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
     """
-    Аутентифікація користувача
+    Аутентифікація користувача та видача JWT access/refresh токенів.
     """
+    if credentials is not None:
+        username = credentials.username
+        password = credentials.password
+
+    if not username or not password:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Передайте username і password у JSON body або query params",
+        )
 
     # Пошук користувача + підвантаження ролей
     user = (
         db.query(User)
         .options(joinedload(User.roles))
-        .filter(User.username == credentials.username)
+        .filter(User.username == username)
         .first()
     )
 
     # Захист від enumeration attack
     try:
-        is_valid_password = bool(
-            user and verify_password(credentials.password, user.password_hash)
-        )
+        is_valid_password = bool(user and verify_password(password, user.password_hash))
     except ValueError:
         is_valid_password = False
 
@@ -99,12 +125,82 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
             detail="Акаунт деактивовано",
         )
 
-    # Отримання ролей
-    user_roles = [role.name for role in user.roles]
+    role = user.roles[0].name if user.roles else "student"
+    access_token = create_access_token(user.id, role)
+    refresh_token = create_refresh_token(user.id)
 
-    return LoginResponse(
-        message="Вхід успішний",
-        user_id=user.id,
-        username=user.username,
-        roles=user_roles,
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
+
+
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    summary="Оновлення access token",
+)
+def refresh_token(body: TokenRefreshRequest, db: Session = Depends(get_db)):
+    try:
+        payload = verify_token(body.refresh_token)
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Невалідний refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Потрібен refresh token, а не access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        user_id = int(payload["sub"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token не містить коректного користувача",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = (
+        db.query(User)
+        .options(joinedload(User.roles))
+        .filter(User.id == user_id)
+        .first()
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Користувача не знайдено",
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Акаунт деактивовано",
+        )
+
+    role = user.roles[0].name if user.roles else "student"
+    return TokenResponse(
+        access_token=create_access_token(user.id, role),
+        refresh_token=create_refresh_token(user.id),
+    )
+
+
+@router.get(
+    "/me",
+    response_model=UserInfo,
+    summary="Поточний автентифікований користувач",
+)
+def get_me(current_user: User = Depends(get_current_user)):
+    role = current_user.roles[0].name if current_user.roles else "student"
+    return UserInfo(
+        id=current_user.id,
+        username=current_user.username,
+        email=current_user.email,
+        full_name=current_user.full_name,
+        role=role,
     )
