@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.orm import Session, joinedload
@@ -72,10 +72,24 @@ def get_current_user(
 
 
 def require_role(*allowed_roles: str):
-    def role_checker(current_user: User = Depends(get_current_user)) -> User:
+    def role_checker(
+        request: Request,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> User:
         user_roles = [role.name for role in current_user.roles]
 
         if not any(role in user_roles for role in allowed_roles):
+            from app.audit.logger import log_access_denied
+
+            ip = request.client.host if request.client else "unknown"
+            log_access_denied(
+                db=db,
+                user_id=current_user.id,
+                username=current_user.username,
+                ip=ip,
+                endpoint=request.url.path,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Доступ заборонено. Потрібна роль: {', '.join(allowed_roles)}",

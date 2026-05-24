@@ -4,12 +4,16 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 
+from datetime import datetime, timezone
+
 from app.auth.dependencies import get_current_user
 from app.auth.jwt_handler import (
     create_access_token,
     create_refresh_token,
     verify_token,
 )
+from app.audit.detector import check_brute_force, check_off_hours_access
+from app.audit.logger import log_login_failed, log_login_success
 from app.crypto.encryption import field_lookup_hash
 from app.database import get_db
 from app.middleware.rate_limiter import limiter
@@ -88,7 +92,7 @@ def register(
     response_model=TokenResponse,
     summary="Вхід користувача",
 )
-@limiter.limit("5/minute")
+@limiter.limit("20/minute")
 def login(
     request: Request,
     credentials: LoginRequest | None = Body(default=None),
@@ -104,6 +108,8 @@ def login(
     """
     Аутентифікація користувача та видача JWT access/refresh токенів.
     """
+    ip = request.client.host if request.client else "unknown"
+
     if credentials is not None:
         username = credentials.username
         password = credentials.password
@@ -124,6 +130,19 @@ def login(
             detail="Передайте username і password у JSON body або query params",
         )
 
+    if check_brute_force(db, ip):
+        log_login_failed(
+            db,
+            username=username,
+            ip=ip,
+            reason="brute_force_blocked",
+            status_code=429,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Забагато невдалих спроб. Спробуйте пізніше.",
+        )
+
     # Пошук користувача + підвантаження ролей
     user = (
         db.query(User)
@@ -139,6 +158,7 @@ def login(
         is_valid_password = False
 
     if not is_valid_password:
+        log_login_failed(db, username=username, ip=ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Невірний логін або пароль",
@@ -152,6 +172,14 @@ def login(
         )
 
     role = user.roles[0].name if user.roles else "student"
+    check_off_hours_access(
+        db,
+        user_id=user.id,
+        username=user.username,
+        ip=ip,
+        hour=datetime.now(timezone.utc).hour,
+    )
+    log_login_success(db, user_id=user.id, username=user.username, ip=ip)
     access_token = create_access_token(user.id, role)
     refresh_token = create_refresh_token(user.id)
 
