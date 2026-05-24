@@ -19,6 +19,13 @@ class UserCreate(BaseModel):
         description="Логін: 3-30 символів, лише латиниця, цифри, підкреслення",
     )
     email: EmailStr
+    phone: str | None = Field(
+        default=None,
+        min_length=7,
+        max_length=20,
+        pattern=r"^\+?[0-9\s().-]+$",
+        description="Телефон: цифри, пробіли, +, -, дужки",
+    )
     password: str = Field(..., min_length=8, max_length=128)
     full_name: str = Field(..., min_length=2, max_length=100)
 
@@ -41,6 +48,15 @@ class UserCreate(BaseModel):
             raise ValueError("Пароль має містити хоча б одну цифру")
         return v
 
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if contains_sql_patterns(v):
+            raise ValueError("Телефон містить підозрілі SQL-патерни")
+        return v.strip()
+
     @field_validator("full_name")
     @classmethod
     def validate_full_name(cls, v: str) -> str:
@@ -58,7 +74,8 @@ class UserResponse(BaseModel):
 
     id: int
     username: str
-    email: EmailStr
+    email: str
+    phone: str | None = None
     full_name: str
     is_active: bool
     created_at: datetime
@@ -101,7 +118,8 @@ class TokenRefreshRequest(BaseModel):
 class UserInfo(BaseModel):
     id: int
     username: str
-    email: EmailStr
+    email: str
+    phone: str | None = None
     full_name: str
     role: str
 

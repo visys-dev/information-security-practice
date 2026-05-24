@@ -9,7 +9,9 @@ services:
       - db_data:/app_code/data
     environment:
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=sqlite:///./data/app.db
       - JWT_SECRET_KEY=my-dev-secret-key-32-chars-long!!
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
     restart: unless-stopped
 
 volumes:

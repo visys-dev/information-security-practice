@@ -10,6 +10,7 @@ from app.auth.jwt_handler import (
     create_refresh_token,
     verify_token,
 )
+from app.crypto.encryption import field_lookup_hash
 from app.database import get_db
 from app.middleware.rate_limiter import limiter
 from app.models import User
@@ -53,7 +54,7 @@ def register(
         )
 
     # Перевірка email
-    if db.query(User).filter(User.email == email).first():
+    if db.query(User).filter(User.email_hash == field_lookup_hash(email)).first():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email вже зареєстровано",
@@ -63,6 +64,7 @@ def register(
     new_user = User(
         username=user_data.username,
         email=email,
+        phone=user_data.phone,
         full_name=user_data.full_name,
         password_hash=hash_password(user_data.password),
     )
@@ -225,6 +227,7 @@ def get_me(current_user: User = Depends(get_current_user)):
         id=current_user.id,
         username=current_user.username,
         email=current_user.email,
+        phone=current_user.phone,
         full_name=current_user.full_name,
         role=role,
     )

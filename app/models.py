@@ -10,6 +10,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from app.crypto.encryption import decrypt_field, encrypt_field, field_lookup_hash
 from app.database import Base
 
 # --- M:N таблиці (ТУТ тільки Column!) ---
@@ -38,8 +39,12 @@ class User(Base):
     username: Mapped[str] = mapped_column(
         String(50), unique=True, nullable=False, index=True
     )
-    email: Mapped[str] = mapped_column(
-        String(100), unique=True, nullable=False, index=True
+    _encrypted_email: Mapped[str] = mapped_column(
+        "encrypted_email", String(255), nullable=False
+    )
+    email_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    _encrypted_phone: Mapped[str | None] = mapped_column(
+        "encrypted_phone", String(255), nullable=True
     )
     full_name: Mapped[str] = mapped_column(String(150), nullable=False)
 
@@ -63,6 +68,24 @@ class User(Base):
         back_populates="student",
         foreign_keys="Grade.student_id",
     )
+
+    @property
+    def email(self) -> str:
+        return decrypt_field(self._encrypted_email) or ""
+
+    @email.setter
+    def email(self, value: str) -> None:
+        normalized = value.strip().lower()
+        self._encrypted_email = encrypt_field(normalized) or ""
+        self.email_hash = field_lookup_hash(normalized) or ""
+
+    @property
+    def phone(self) -> str | None:
+        return decrypt_field(self._encrypted_phone)
+
+    @phone.setter
+    def phone(self, value: str | None) -> None:
+        self._encrypted_phone = encrypt_field(value.strip()) if value else None
 
     def __repr__(self):
         return f"<User {self.username}>"

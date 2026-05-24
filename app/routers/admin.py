@@ -19,6 +19,7 @@ def list_users(
             "id": user.id,
             "username": user.username,
             "email": user.email,
+            "phone": user.phone,
             "roles": [role.name for role in user.roles],
         }
         for user in users
